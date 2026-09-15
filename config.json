@@ -1,0 +1,9 @@
+{
+  "region_label": "Chișinău mun.",
+  "subzone_label": "Codru",
+  "min_price": 0,
+  "max_price": 100000,
+  "min_land": 4,
+  "max_land": null,
+  "max_pages": 100
+}
