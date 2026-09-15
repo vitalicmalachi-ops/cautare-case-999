@@ -1,0 +1,44 @@
+name: Cautare Case 999.md
+
+on:
+  schedule:
+    # Ruleaza la fiecare 6 ore. Orele sunt in UTC (Moldova e UTC+2 sau
+    # UTC+3 vara), deci ajustezi dupa preferinta daca vrei ore exacte.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    # Permite sa apesi manual butonul "Run workflow" din GitHub, ca sa
+    # testezi fara sa astepti urmatoarea rulare programata.
+
+permissions:
+  contents: write
+
+jobs:
+  cauta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descarca fisierele din depozit
+        uses: actions/checkout@v4
+
+      - name: Pregateste Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instaleaza pachetele necesare
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Ruleaza cautarea si trimite notificari
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify_scraper.py
+
+      - name: Salveaza lista anunturilor deja vazute
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Actualizare stare cautare [skip ci]"
+          git push
