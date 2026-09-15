@@ -34,7 +34,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python notify_scraper.py
+          PYTHONUNBUFFERED: "1"
+        run: python -u notify_scraper.py
 
       - name: Salveaza lista anunturilor deja vazute
         run: |
