@@ -271,6 +271,7 @@ def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages:
     filtered_base_url = page.url
     ad_ids = []
     seen_this_run = set()
+    consecutive_fully_known_pages = 0
     for page_num in range(1, max_pages + 1):
         url = build_page_url(filtered_base_url, page_num)
         page.goto(url, wait_until="networkidle", timeout=60000)
@@ -298,12 +299,21 @@ def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages:
 
         print(f"    [Lista {page_num}] {added} anunturi noi ({len(ad_ids)} total).")
 
-        # OPTIMIZARE: daca toate anunturile de pe aceasta pagina sunt deja
-        # cunoscute dintr-o rulare anterioara, am ajuns la anunturi vechi
-        # (site-ul sorteaza descrescator dupa data postarii) - oprim aici.
+        # OPTIMIZARE (cu marja de siguranta): 999.md permite promovarea
+        # contra cost a anunturilor, care le aduce din nou in fata listei
+        # chiar daca nu sunt noi. Asta inseamna ca o SINGURA pagina plina
+        # doar cu anunturi cunoscute nu garanteaza ca tot ce urmeaza e
+        # vechi - un anunt chiar nou ar putea fi impins mai jos de unul
+        # promovat. De aceea cerem DOUA pagini la rand complet cunoscute
+        # inainte sa oprim paginarea.
         if page_ids and all(pid in known_ids for pid in page_ids):
-            print("    Toate anunturile de pe aceasta pagina sunt deja cunoscute - opresc paginarea (optimizare).")
-            break
+            consecutive_fully_known_pages += 1
+            print(f"    Pagina complet cunoscuta ({consecutive_fully_known_pages}/2 la rand).")
+            if consecutive_fully_known_pages >= 2:
+                print("    Doua pagini la rand complet cunoscute - opresc paginarea (optimizare).")
+                break
+        else:
+            consecutive_fully_known_pages = 0
 
         if added == 0:
             print("    Nu mai sunt anunturi noi, am ajuns probabil la ultima pagina.")
