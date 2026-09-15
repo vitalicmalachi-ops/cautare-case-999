@@ -390,7 +390,7 @@ def main():
     details_cache = {}
     checked = 0
     total = len(all_ad_ids)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         future_to_id = {
             executor.submit(fetch_ad_details, session, ad_id): ad_id
             for ad_id in all_ad_ids
