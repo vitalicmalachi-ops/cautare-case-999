@@ -1,9 +1,29 @@
 {
-  "region_label": "Chișinău mun.",
-  "subzone_label": "Toate (mun. Chișinău)",
-  "min_price": 0,
-  "max_price": 100000,
-  "min_land": 4,
-  "max_land": null,
-  "max_pages": 100
+  "telegram_chat_ids": [
+    "5600797048"
+  ],
+  "profiles": [
+    {
+      "label": "Case",
+      "region_label": "Chișinău mun.",
+      "subzone_label": "Toate (mun. Chișinău)",
+      "property_type": "casa",
+      "min_price": 0,
+      "max_price": 100000,
+      "min_land": 4,
+      "max_land": null,
+      "max_pages": 100
+    },
+    {
+      "label": "Teren",
+      "region_label": "Chișinău mun.",
+      "subzone_label": "Toate (mun. Chișinău)",
+      "property_type": "teren",
+      "min_price": 0,
+      "max_price": 50000,
+      "min_land": 4,
+      "max_land": null,
+      "max_pages": 100
+    }
+  ]
 }
