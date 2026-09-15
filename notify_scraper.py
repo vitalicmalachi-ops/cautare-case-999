@@ -32,6 +32,7 @@ import sys
 import json
 import time
 import unicodedata
+import concurrent.futures
 
 import requests
 from bs4 import BeautifulSoup
@@ -301,44 +302,59 @@ def main():
         browser.close()
 
     print(f"Total anunturi de verificat: {len(ad_ids)}")
-    print("PASUL 2: verificare detaliata si trimitere notificari...")
+    print("PASUL 2: verificare detaliata si trimitere notificari (in paralel)...")
 
     session = requests.Session()
     new_matches = 0
-    for i, ad_id in enumerate(ad_ids, start=1):
-        details = fetch_ad_details(session, ad_id)
-        time.sleep(0.5)
-        if details is None:
-            continue
+    checked = 0
+    total = len(ad_ids)
 
-        if details["region"] != region_expected:
-            continue
-        if not matches_subzone(details, subzone_label):
-            continue
-        if (details["price"] is None or details["currency"] != "EUR"
-                or details["price"] < min_price or details["price"] > max_price):
-            continue
-        if details["land_ari"] is None or details["land_ari"] < min_land:
-            continue
-        if max_land is not None and details["land_ari"] > max_land:
-            continue
+    # Verificam mai multe anunturi deodata (8 in paralel) in loc de unul
+    # cate unul - timpul de asteptare al fiecarei cereri se suprapune,
+    # ceea ce reduce timpul total de rulare de mai multe ori (de la ore
+    # la minute, pentru sute/mii de anunturi).
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_id = {
+            executor.submit(fetch_ad_details, session, ad_id): ad_id
+            for ad_id in ad_ids
+        }
+        for future in concurrent.futures.as_completed(future_to_id):
+            checked += 1
+            if checked % 50 == 0 or checked == total:
+                print(f"  Verificate {checked}/{total}...")
 
-        # A trecut de toate criteriile - e o potrivire. Notificam DOAR daca
-        # nu am mai vazut acest anunt la rulari anterioare.
-        if ad_id in seen_ids:
-            continue
+            details = future.result()
+            if details is None:
+                continue
 
-        new_matches += 1
-        text = (
-            f"🏠 <b>{details['title']}</b>\n"
-            f"💰 {details['price']:.0f} EUR\n"
-            f"📐 {details['land_ari']} ari"
-            + (f" — {details['zona']}" if details['zona'] else "") + "\n"
-            f"🔗 {details['url']}"
-        )
-        print(f"  NOU: {details['url']}")
-        send_telegram_message(bot_token, chat_id, text)
-        seen_ids.add(ad_id)
+            if details["region"] != region_expected:
+                continue
+            if not matches_subzone(details, subzone_label):
+                continue
+            if (details["price"] is None or details["currency"] != "EUR"
+                    or details["price"] < min_price or details["price"] > max_price):
+                continue
+            if details["land_ari"] is None or details["land_ari"] < min_land:
+                continue
+            if max_land is not None and details["land_ari"] > max_land:
+                continue
+
+            # A trecut de toate criteriile - e o potrivire. Notificam DOAR
+            # daca nu am mai vazut acest anunt la rulari anterioare.
+            if details["ad_id"] in seen_ids:
+                continue
+
+            new_matches += 1
+            text = (
+                f"🏠 <b>{details['title']}</b>\n"
+                f"💰 {details['price']:.0f} EUR\n"
+                f"📐 {details['land_ari']} ari"
+                + (f" — {details['zona']}" if details['zona'] else "") + "\n"
+                f"🔗 {details['url']}"
+            )
+            print(f"  NOU: {details['url']}")
+            send_telegram_message(bot_token, chat_id, text)
+            seen_ids.add(details["ad_id"])
 
     # Adaugam si restul anunturilor vazute in aceasta rulare (chiar daca nu
     # au corespuns criteriilor), ca sa nu le re-analizam degeaba data viitoare
