@@ -13,7 +13,7 @@
       "max_price": 100000,
       "min_land": 4,
       "max_land": null,
-      "max_pages": 100
+      "max_pages": 10
     },
     {
       "label": "Teren",
@@ -24,7 +24,7 @@
       "max_price": 50000,
       "min_land": 4,
       "max_land": null,
-      "max_pages": 100
+      "max_pages": 10
     }
   ]
 }
