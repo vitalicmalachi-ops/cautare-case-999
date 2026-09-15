@@ -15,6 +15,7 @@ permissions:
 jobs:
   cauta:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Descarca fisierele din depozit
         uses: actions/checkout@v4
@@ -40,5 +41,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Actualizare stare cautare [skip ci]"
-          git push
+          if ! git diff --staged --quiet; then
+            git commit -m "Actualizare stare cautare [skip ci]"
+            # Daca intre timp a mai fost o modificare pe GitHub (ex: ai
+            # editat manual config.json cat timp rula cautarea), "pull"
+            # aduce acea schimbare peste commit-ul nostru, in loc sa
+            # blocheze salvarea starii.
+            git pull --rebase origin main
+            git push
+          else
+            echo "Nimic nou de salvat in state.json."
+          fi
