@@ -35,7 +35,14 @@ CONFIG_PATH = "config.json"
 STATE_PATH = "state.json"
 MAX_SEEN_IDS_KEPT_PER_PROFILE = 3000
 
-BASE_URL = "https://999.md/ro/list/real-estate/house-and-garden"
+# 999.md tine casele si terenurile in DOUA categorii separate pe site
+# (nu una singura, cum am crezut initial). Fiecare profil cauta in
+# categoria corecta, in functie de "property_type".
+CATEGORY_URLS = {
+    "casa": "https://999.md/ro/list/real-estate/house-and-garden",
+    "teren": "https://999.md/ro/list/real-estate/land",
+    "oricare": "https://999.md/ro/list/real-estate/house-and-garden",
+}
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -273,7 +280,7 @@ def save_json(path, data):
 # Colectare ID-uri de anunturi pentru o regiune (Playwright)
 # ---------------------------------------------------------------------------
 
-def collect_ad_ids_for_region(page, region_label: str, max_pages: int):
+def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages: int):
     region_click_text, _ = REGIONS[region_label]
 
     # IMPORTANT: NU folosim wait_until="networkidle" aici. Paginile de
@@ -283,7 +290,7 @@ def collect_ad_ids_for_region(page, region_label: str, max_pages: int):
     # inmultit cu 100 de pagini posibile, insemna ore intregi irosite.
     # "domcontentloaded" + o mica asteptare fixa e suficient ca sa
     # apuce anunturile din pagina, fara sa astepte reclamele.
-    page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+    page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(1500)
     try:
         page.get_by_text(region_click_text, exact=True).first.click(timeout=8000)
@@ -356,11 +363,12 @@ def main():
     state = load_json(STATE_PATH, {"seen": {}})
     seen_by_profile = state.get("seen", {})
 
-    # Pasul 1: colectam ID-urile de anunturi o singura data per REGIUNE
-    # (mai multe profiluri pe aceeasi regiune refolosesc aceeasi lista,
-    # nu se descarca de doua ori acelasi anunt).
-    print("PASUL 1: colectare ID-uri anunturi, per regiune...")
-    ad_ids_by_region = {}
+    # Pasul 1: colectam ID-urile de anunturi o singura data per
+    # (categorie, regiune) - profilurile care cauta in aceeasi
+    # categorie SI aceeasi regiune refolosesc aceeasi lista, nu se
+    # descarca de doua ori acelasi anunt.
+    print("PASUL 1: colectare ID-uri anunturi, per categorie+regiune...")
+    ad_ids_by_key = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, channel="chromium")
         page = browser.new_page(locale="ro-RO")
@@ -368,16 +376,18 @@ def main():
         for profile in profiles:
             region_label = profile.get("region_label", "Chișinău mun.")
             max_pages = int(profile.get("max_pages", 100))
-            key = (region_label, max_pages)
-            if key in ad_ids_by_region:
+            property_type = profile.get("property_type", "oricare")
+            base_url = CATEGORY_URLS.get(property_type, CATEGORY_URLS["oricare"])
+            key = (base_url, region_label, max_pages)
+            if key in ad_ids_by_key:
                 continue
-            print(f"Colectare pentru regiune='{region_label}' (max {max_pages} pagini)...")
-            ad_ids_by_region[key] = collect_ad_ids_for_region(page, region_label, max_pages)
+            print(f"Colectare din '{base_url}' pentru regiune='{region_label}' (max {max_pages} pagini)...")
+            ad_ids_by_key[key] = collect_ad_ids_for_region(page, base_url, region_label, max_pages)
 
         browser.close()
 
     all_ad_ids = set()
-    for ids in ad_ids_by_region.values():
+    for ids in ad_ids_by_key.values():
         all_ad_ids.update(ids)
     print(f"\nTotal anunturi unice de verificat (toate profilurile): {len(all_ad_ids)}")
 
@@ -400,9 +410,22 @@ def main():
             ad_id = future_to_id[future]
             details_cache[ad_id] = future.result()
 
-    # Pasul 3: aplicam criteriile FIECARUI profil pe cache-ul comun de
-    # detalii, si trimitem notificari pentru potrivirile noi.
+    # Pasul 3: aplicam criteriile FIECARUI profil.
+    #
+    # Sursa principala e categoria corecta de pe site (de incredere).
+    # Dar oamenii mai greseesc categoria cand posteaza un anunt - ca sa
+    # nu ratam un teren postat din greseala printre case (sau invers),
+    # verificam si "cealalta" categorie, si acceptam de-acolo DOAR
+    # anunturile al caror titlu chiar pare sa fie tipul cautat (plasa
+    # de siguranta bazata pe text, nu sursa principala).
     print("\nPASUL 3: aplicare criterii per profil si notificare...")
+
+    # Toate ID-urile colectate, grupate doar dupa regiune (indiferent
+    # de categorie), ca sa putem cauta "rataciti" intre categorii.
+    ids_by_region_any_category = {}
+    for (b_url, r_label, m_pages), ids in ad_ids_by_key.items():
+        ids_by_region_any_category.setdefault(r_label, set()).update(ids)
+
     total_new = 0
     for profile in profiles:
         label = profile.get("label", "Cautare")
@@ -417,7 +440,18 @@ def main():
         max_pages = int(profile.get("max_pages", 100))
 
         _, region_expected = REGIONS[region_label]
-        candidate_ids = ad_ids_by_region.get((region_label, max_pages), [])
+        base_url = CATEGORY_URLS.get(property_type, CATEGORY_URLS["oricare"])
+        own_ids = set(ad_ids_by_key.get((base_url, region_label, max_pages), []))
+
+        # Candidati "rataciti" in alta categorie: ii acceptam DOAR daca
+        # titlul lor chiar indica tipul cautat.
+        other_ids = ids_by_region_any_category.get(region_label, set()) - own_ids
+        stray_ids = {
+            ad_id for ad_id in other_ids
+            if details_cache.get(ad_id) and details_cache[ad_id].get("property_type") == property_type
+        }
+
+        candidate_ids = own_ids | stray_ids
         seen_ids = set(seen_by_profile.get(label, []))
 
         new_for_profile = 0
@@ -428,8 +462,6 @@ def main():
             if details["region"] != region_expected:
                 continue
             if not matches_subzone(details, subzone_label):
-                continue
-            if not matches_property_type(details, property_type):
                 continue
             if (details["price"] is None or details["currency"] != "EUR"
                     or details["price"] < min_price or details["price"] > max_price):
@@ -442,15 +474,16 @@ def main():
                 continue
 
             new_for_profile += 1
+            stray_tag = " (categorie diferita)" if ad_id in stray_ids else ""
             text = (
-                f"🏷️ <b>{label}</b>\n"
+                f"🏷️ <b>{label}</b>{stray_tag}\n"
                 f"🏠 {details['title']}\n"
                 f"💰 {details['price']:.0f} EUR\n"
                 f"📐 {details['land_ari']} ari"
                 + (f" — {details['zona']}" if details['zona'] else "") + "\n"
                 f"🔗 {details['url']}"
             )
-            print(f"  [{label}] NOU: {details['url']}")
+            print(f"  [{label}] NOU: {details['url']}{stray_tag}")
             notify_all(bot_token, chat_ids, text)
             seen_ids.add(ad_id)
 
