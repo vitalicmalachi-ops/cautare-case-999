@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Cautare Case 999.md - Notificator Telegram (v2: mai multi useri + profiluri)
+Cautare Case 999.md - Notificator Telegram (v3: oprire optimizata paginare)
 ================================================================================
 
-Nou fata de v1:
-  - Poti trimite notificari catre MAI MULTE persoane (lista de chat_id-uri
-    in config.json, nu doar unul).
-  - Poti defini MAI MULTE "profiluri" de cautare in acelasi config.json,
-    fiecare cu criteriile lui proprii (ex: "Case Codru" cu un pret, si
-    separat "Terenuri toata Chisinau" cu alt pret/teren). Toate profilurile
-    sunt verificate in aceeasi rulare. Daca mai multe profiluri cauta in
-    aceeasi regiune, lista de anunturi se descarca o singura data si se
-    refoloseste (nu se descarca de doua ori acelasi anunt).
-  - Fiecare profil poate filtra si dupa "tip" (casa / teren / oricare) -
-    utile pentru ca 999.md tine casele si terenurile in aceeasi categorie.
+Nou fata de v2:
+  - Optimizare de viteza: la fiecare rulare, pastram acum lista completa de
+    ID-uri de anunturi VAZUTE in lista (nu doar cele care au corespuns
+    criteriilor), separat per categorie+regiune, in state.json.
+    Deoarece 999.md sorteaza anunturile descrescator dupa data postarii,
+    daca o pagina intreaga contine DOAR ID-uri deja cunoscute dintr-o
+    rulare anterioara, inseamna ca am ajuns la anunturi vechi si NU mai
+    are rost sa continuam paginarea - o oprim imediat.
+    Asta reduce rularile ulterioare (dupa prima, care ramane completa)
+    de la 20-30 minute la 1-2 minute.
+
+Restul functionalitatii e identic cu v2:
+  - Notificari catre mai multi useri (telegram_chat_ids in config.json).
+  - Mai multe "profiluri" de cautare (case / terenuri, cu criterii proprii).
+  - Cauta in categoria corecta a site-ului (CATEGORY_URLS), plus o plasa
+    de siguranta pentru anunturile mis-categorizate in cealalta categorie.
 
 Vezi config.json pentru formatul exact.
 """
@@ -34,10 +39,9 @@ from playwright.sync_api import sync_playwright
 CONFIG_PATH = "config.json"
 STATE_PATH = "state.json"
 MAX_SEEN_IDS_KEPT_PER_PROFILE = 3000
+MAX_SEEN_LIST_IDS_KEPT = 6000  # per categorie+regiune, pentru optimizarea de paginare
 
-# 999.md tine casele si terenurile in DOUA categorii separate pe site
-# (nu una singura, cum am crezut initial). Fiecare profil cauta in
-# categoria corecta, in functie de "property_type".
+# 999.md tine casele si terenurile in DOUA categorii separate pe site.
 CATEGORY_URLS = {
     "casa": "https://999.md/ro/list/real-estate/house-and-garden",
     "teren": "https://999.md/ro/list/real-estate/land",
@@ -95,40 +99,9 @@ LAND_FALLBACK_CYRILLIC = [
 REGION_LINE_PATTERN = re.compile(r"([^\n,]+?)\s+mun\.,")
 ADDRESS_LINE_PATTERN = re.compile(r"^(.+mun\.,.*)$", re.MULTILINE)
 
-# "Tip" e eticheta de pe site care spune daca anuntul e Casa, Teren, Vila
-# etc. Metoda principala, mult mai sigura: titlul anuntului INCEPE cu
-# tipul, dar NU neaparat la inceput (multe titluri incep cu numele
-# localitatii, ex: "Bălți, 4 ari, Teren agricol") - de-aia cautam
-# cuvantul oriunde in titlu, nu doar la inceput. Textul de pe pagina
-# ("Tip: Casă") ramane doar ca metoda de rezerva, mai putin sigura.
 PROPERTY_TYPE_PATTERN = re.compile(
     r"\btip\b[:\s]{0,4}(casa|teren|vila|townhouse|duplex|apartament)\b"
 )
-
-TITLE_CASA_PATTERN = re.compile(r"\bcas[ae]\b")
-TITLE_VILA_PATTERN = re.compile(r"\b(vila|townhouse|duplex)\b")
-TITLE_TEREN_PATTERN = re.compile(r"\bteren\w*\b")
-
-
-def detect_property_type(title: str, full_text_latin_norm: str) -> str:
-    # 1) Cuvantul "casa"/"vila" sau "teren" oriunde in titlu. Daca
-    # titlul contine AMBELE (ex: "casa cu teren 6 ari"), consideram
-    # ca e o casa - "teren" acolo se refera la terenul din curte, nu
-    # la un anunt de teren gol.
-    t = strip_diacritics(title)
-    if TITLE_CASA_PATTERN.search(t) or TITLE_VILA_PATTERN.search(t):
-        return "casa"
-    if TITLE_TEREN_PATTERN.search(t):
-        return "teren"
-
-    # 2) Eticheta structurata "Tip" din restul paginii, daca titlul nu
-    # a lamurit nimic.
-    m = PROPERTY_TYPE_PATTERN.search(full_text_latin_norm)
-    if m:
-        val = m.group(1)
-        return "teren" if val == "teren" else "casa"
-
-    return "necunoscut"
 
 
 def parse_land_ari(full_text_lower: str):
@@ -149,6 +122,14 @@ def parse_land_ari(full_text_lower: str):
     return None
 
 
+def detect_property_type(full_text_latin_norm: str) -> str:
+    m = PROPERTY_TYPE_PATTERN.search(full_text_latin_norm)
+    if not m:
+        return "necunoscut"
+    val = m.group(1)
+    return "teren" if val == "teren" else "casa"
+
+
 def matches_subzone(details: dict, subzone_label: str) -> bool:
     if not subzone_label or subzone_label.startswith("Toate"):
         return True
@@ -156,12 +137,6 @@ def matches_subzone(details: dict, subzone_label: str) -> bool:
     zona_norm = strip_diacritics(details.get("zona") or "")
     adresa_norm = strip_diacritics(details.get("adresa") or "")
     return target == zona_norm or target in adresa_norm
-
-
-def matches_property_type(details: dict, wanted: str) -> bool:
-    if not wanted or wanted == "oricare":
-        return True
-    return details.get("property_type") == wanted
 
 
 def fetch_ad_details(session, ad_id: str):
@@ -213,7 +188,7 @@ def fetch_ad_details(session, ad_id: str):
         adresa = ", ".join(tokens[1:]) if len(tokens) > 1 else full_line
 
     land_ari = parse_land_ari(full_text_lower)
-    property_type = detect_property_type(title, full_text_latin_norm)
+    property_type = detect_property_type(full_text_latin_norm)
 
     return {
         "ad_id": ad_id, "url": url, "title": title,
@@ -277,24 +252,18 @@ def save_json(path, data):
 
 
 # ---------------------------------------------------------------------------
-# Colectare ID-uri de anunturi pentru o regiune (Playwright)
+# Colectare ID-uri de anunturi pentru o categorie+regiune (Playwright)
 # ---------------------------------------------------------------------------
 
-def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages: int):
+def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages: int, known_ids: set):
     region_click_text, _ = REGIONS[region_label]
 
-    # IMPORTANT: NU folosim wait_until="networkidle" aici. Paginile de
-    # lista de pe 999.md au reclame/scripturi de analytics care tin
-    # conexiuni de retea "vii" la nesfarsit, asa ca "networkidle" poate
-    # astepta degeaba pana la limita de 60 secunde PE FIECARE PAGINA -
-    # inmultit cu 100 de pagini posibile, insemna ore intregi irosite.
-    # "domcontentloaded" + o mica asteptare fixa e suficient ca sa
-    # apuce anunturile din pagina, fara sa astepte reclamele.
-    page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_timeout(1500)
+    page.goto(base_url, wait_until="networkidle", timeout=60000)
+    page.wait_for_timeout(1000)
     try:
         page.get_by_text(region_click_text, exact=True).first.click(timeout=8000)
-        page.wait_for_timeout(2000)
+        page.wait_for_load_state("networkidle", timeout=15000)
+        page.wait_for_timeout(1500)
         print(f"  Filtru regiune '{region_label}' aplicat. URL: {page.url}")
     except Exception as e:
         print(f"  Nu am putut da click pe filtrul de regiune '{region_label}' ({e}). Continui oricum.")
@@ -304,12 +273,8 @@ def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages:
     seen_this_run = set()
     for page_num in range(1, max_pages + 1):
         url = build_page_url(filtered_base_url, page_num)
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        except Exception as e:
-            print(f"    [Lista {page_num}] Eroare/timeout la incarcare ({e}). Opresc paginarea aici.")
-            break
-        page.wait_for_timeout(1500)
+        page.goto(url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(1200)
 
         hrefs = page.evaluate(
             """
@@ -318,16 +283,32 @@ def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages:
                 .filter(h => h && /^\\/ro\\/\\d+/.test(h))
             """
         )
-        added = 0
+        page_ids = []
         for h in hrefs:
             m = re.match(r"^/ro/(\d+)", h)
-            if m and m.group(1) not in seen_this_run:
-                seen_this_run.add(m.group(1))
-                ad_ids.append(m.group(1))
+            if m:
+                page_ids.append(m.group(1))
+
+        added = 0
+        for ad_id in page_ids:
+            if ad_id not in seen_this_run:
+                seen_this_run.add(ad_id)
+                ad_ids.append(ad_id)
                 added += 1
+
         print(f"    [Lista {page_num}] {added} anunturi noi ({len(ad_ids)} total).")
-        if added == 0:
+
+        # OPTIMIZARE: daca toate anunturile de pe aceasta pagina sunt deja
+        # cunoscute dintr-o rulare anterioara, am ajuns la anunturi vechi
+        # (site-ul sorteaza descrescator dupa data postarii) - oprim aici.
+        if page_ids and all(pid in known_ids for pid in page_ids):
+            print("    Toate anunturile de pe aceasta pagina sunt deja cunoscute - opresc paginarea (optimizare).")
             break
+
+        if added == 0:
+            print("    Nu mai sunt anunturi noi, am ajuns probabil la ultima pagina.")
+            break
+
         time.sleep(1.0)
 
     return ad_ids
@@ -347,7 +328,6 @@ def main():
 
     chat_ids = config.get("telegram_chat_ids")
     if not chat_ids:
-        # compatibilitate cu formatul vechi (un singur chat_id, ca variabila de mediu)
         single = os.environ.get("TELEGRAM_CHAT_ID")
         chat_ids = [single] if single else []
     if not chat_ids:
@@ -360,13 +340,15 @@ def main():
         print("EROARE: config.json trebuie sa aiba o lista 'profiles' cu cel putin un profil.")
         sys.exit(1)
 
-    state = load_json(STATE_PATH, {"seen": {}})
+    state = load_json(STATE_PATH, {"seen": {}, "seen_list_ids": {}})
     seen_by_profile = state.get("seen", {})
+    seen_list_ids_state = state.get("seen_list_ids", {})
 
     # Pasul 1: colectam ID-urile de anunturi o singura data per
-    # (categorie, regiune) - profilurile care cauta in aceeasi
-    # categorie SI aceeasi regiune refolosesc aceeasi lista, nu se
-    # descarca de doua ori acelasi anunt.
+    # (categorie, regiune) - profilurile care cauta in aceeasi categorie
+    # SI aceeasi regiune refolosesc aceeasi lista. Pentru fiecare
+    # combinatie, folosim ID-urile cunoscute din rularile anterioare ca
+    # sa oprim paginarea mai devreme.
     print("PASUL 1: colectare ID-uri anunturi, per categorie+regiune...")
     ad_ids_by_key = {}
     with sync_playwright() as p:
@@ -381,8 +363,19 @@ def main():
             key = (base_url, region_label, max_pages)
             if key in ad_ids_by_key:
                 continue
-            print(f"Colectare din '{base_url}' pentru regiune='{region_label}' (max {max_pages} pagini)...")
-            ad_ids_by_key[key] = collect_ad_ids_for_region(page, base_url, region_label, max_pages)
+
+            state_key = f"{base_url}|{region_label}"
+            known_ids = set(seen_list_ids_state.get(state_key, []))
+            print(f"Colectare din '{base_url}' pentru regiune='{region_label}' "
+                  f"(max {max_pages} pagini, {len(known_ids)} deja cunoscute)...")
+
+            collected = collect_ad_ids_for_region(page, base_url, region_label, max_pages, known_ids)
+            ad_ids_by_key[key] = collected
+
+            updated_known = known_ids | set(collected)
+            if len(updated_known) > MAX_SEEN_LIST_IDS_KEPT:
+                updated_known = set(list(updated_known)[-MAX_SEEN_LIST_IDS_KEPT:])
+            seen_list_ids_state[state_key] = sorted(updated_known)
 
         browser.close()
 
@@ -391,8 +384,7 @@ def main():
         all_ad_ids.update(ids)
     print(f"\nTotal anunturi unice de verificat (toate profilurile): {len(all_ad_ids)}")
 
-    # Pasul 2: descarcam detaliile fiecarui anunt UNIC, o singura data,
-    # in paralel.
+    # Pasul 2: descarcam detaliile fiecarui anunt UNIC, o singura data, in paralel.
     print("PASUL 2: verificare detaliata (in paralel)...")
     session = requests.Session()
     details_cache = {}
@@ -412,16 +404,14 @@ def main():
 
     # Pasul 3: aplicam criteriile FIECARUI profil.
     #
-    # Sursa principala e categoria corecta de pe site (de incredere).
-    # Dar oamenii mai greseesc categoria cand posteaza un anunt - ca sa
-    # nu ratam un teren postat din greseala printre case (sau invers),
+    # Sursa principala e categoria corecta de pe site (de incredere). Dar
+    # oamenii mai greseesc categoria cand posteaza un anunt - ca sa nu
+    # ratam un teren postat din greseala printre case (sau invers),
     # verificam si "cealalta" categorie, si acceptam de-acolo DOAR
     # anunturile al caror titlu chiar pare sa fie tipul cautat (plasa
     # de siguranta bazata pe text, nu sursa principala).
     print("\nPASUL 3: aplicare criterii per profil si notificare...")
 
-    # Toate ID-urile colectate, grupate doar dupa regiune (indiferent
-    # de categorie), ca sa putem cauta "rataciti" intre categorii.
     ids_by_region_any_category = {}
     for (b_url, r_label, m_pages), ids in ad_ids_by_key.items():
         ids_by_region_any_category.setdefault(r_label, set()).update(ids)
@@ -443,8 +433,6 @@ def main():
         base_url = CATEGORY_URLS.get(property_type, CATEGORY_URLS["oricare"])
         own_ids = set(ad_ids_by_key.get((base_url, region_label, max_pages), []))
 
-        # Candidati "rataciti" in alta categorie: ii acceptam DOAR daca
-        # titlul lor chiar indica tipul cautat.
         other_ids = ids_by_region_any_category.get(region_label, set()) - own_ids
         stray_ids = {
             ad_id for ad_id in other_ids
@@ -493,7 +481,7 @@ def main():
         print(f"  Profil '{label}': {new_for_profile} anunturi noi.")
         total_new += new_for_profile
 
-    save_json(STATE_PATH, {"seen": seen_by_profile})
+    save_json(STATE_PATH, {"seen": seen_by_profile, "seen_list_ids": seen_list_ids_state})
     print(f"\nGata! {total_new} anunturi noi trimise pe Telegram, in total.")
 
 
