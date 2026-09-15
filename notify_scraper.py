@@ -312,12 +312,18 @@ def save_json(path, data):
 def collect_ad_ids_for_region(page, region_label: str, max_pages: int):
     region_click_text, _ = REGIONS[region_label]
 
-    page.goto(BASE_URL, wait_until="networkidle", timeout=60000)
-    page.wait_for_timeout(1000)
+    # IMPORTANT: NU folosim wait_until="networkidle" aici. Paginile de
+    # lista de pe 999.md au reclame/scripturi de analytics care tin
+    # conexiuni de retea "vii" la nesfarsit, asa ca "networkidle" poate
+    # astepta degeaba pana la limita de 60 secunde PE FIECARE PAGINA -
+    # inmultit cu 100 de pagini posibile, insemna ore intregi irosite.
+    # "domcontentloaded" + o mica asteptare fixa e suficient ca sa
+    # apuce anunturile din pagina, fara sa astepte reclamele.
+    page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(1500)
     try:
         page.get_by_text(region_click_text, exact=True).first.click(timeout=8000)
-        page.wait_for_load_state("networkidle", timeout=15000)
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(2000)
         print(f"  Filtru regiune '{region_label}' aplicat. URL: {page.url}")
     except Exception as e:
         print(f"  Nu am putut da click pe filtrul de regiune '{region_label}' ({e}). Continui oricum.")
@@ -327,8 +333,12 @@ def collect_ad_ids_for_region(page, region_label: str, max_pages: int):
     seen_this_run = set()
     for page_num in range(1, max_pages + 1):
         url = build_page_url(filtered_base_url, page_num)
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(1200)
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            print(f"    [Lista {page_num}] Eroare/timeout la incarcare ({e}). Opresc paginarea aici.")
+            break
+        page.wait_for_timeout(1500)
 
         hrefs = page.evaluate(
             """
