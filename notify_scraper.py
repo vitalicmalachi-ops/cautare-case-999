@@ -90,63 +90,36 @@ ADDRESS_LINE_PATTERN = re.compile(r"^(.+mun\.,.*)$", re.MULTILINE)
 
 # "Tip" e eticheta de pe site care spune daca anuntul e Casa, Teren, Vila
 # etc. Metoda principala, mult mai sigura: titlul anuntului INCEPE cu
-# tipul (ex: "Casă, 200 m², Chișinău, Telecentru" sau "Teren, 8 ari,
-# Chetrosu") - asta e confirmat din exemple reale. Textul de pe pagina
+# tipul, dar NU neaparat la inceput (multe titluri incep cu numele
+# localitatii, ex: "Bălți, 4 ari, Teren agricol") - de-aia cautam
+# cuvantul oriunde in titlu, nu doar la inceput. Textul de pe pagina
 # ("Tip: Casă") ramane doar ca metoda de rezerva, mai putin sigura.
 PROPERTY_TYPE_PATTERN = re.compile(
     r"\btip\b[:\s]{0,4}(casa|teren|vila|townhouse|duplex|apartament)\b"
 )
 
-HOUSE_AREA_PATTERN = re.compile(
-    r"suprafata total\w*\D{0,10}?([\d]+(?:[.,]\d+)?)\s*m"
-)
-
-# Cuvinte care apar tipic in descrierea libera a unei CASE (dotari
-# interioare) fata de un TEREN gol. Folosite doar ca ultima solutie,
-# cand anuntul e incomplet si nu are nici titlu clar, nici eticheta
-# "Tip", nici suprafata casei completata ca si camp separat.
-HOUSE_KEYWORDS = [
-    "camere", "dormitor", "living", "bucatarie", "baie", "etaj",
-    "reparatie", "mobilat", "izolat", "centrala", "boiler", "hol",
-    "acoperis", "terasa", "balcon",
-]
-LAND_KEYWORDS = [
-    "teren arabil", "loc de casa", "sub constructie", "livada",
-    "vie ", "gradina", "amplasament", "parcela", "constructibil",
-    "fara constructii", "teren gol",
-]
+TITLE_CASA_PATTERN = re.compile(r"\bcas[ae]\b")
+TITLE_VILA_PATTERN = re.compile(r"\b(vila|townhouse|duplex)\b")
+TITLE_TEREN_PATTERN = re.compile(r"\bteren\w*\b")
 
 
-def detect_property_type(title: str, full_text_latin_norm: str, house_area_m2) -> str:
-    # 1) Cel mai sigur semn: titlul incepe cu tipul.
-    t = strip_diacritics(title).strip()
-    if t.startswith("casa"):
+def detect_property_type(title: str, full_text_latin_norm: str) -> str:
+    # 1) Cuvantul "casa"/"vila" sau "teren" oriunde in titlu. Daca
+    # titlul contine AMBELE (ex: "casa cu teren 6 ari"), consideram
+    # ca e o casa - "teren" acolo se refera la terenul din curte, nu
+    # la un anunt de teren gol.
+    t = strip_diacritics(title)
+    if TITLE_CASA_PATTERN.search(t) or TITLE_VILA_PATTERN.search(t):
         return "casa"
-    if t.startswith("teren"):
+    if TITLE_TEREN_PATTERN.search(t):
         return "teren"
-    if t.startswith(("vila", "townhouse", "duplex")):
-        return "casa"
 
-    # 2) Eticheta structurata "Tip" din restul paginii.
+    # 2) Eticheta structurata "Tip" din restul paginii, daca titlul nu
+    # a lamurit nimic.
     m = PROPERTY_TYPE_PATTERN.search(full_text_latin_norm)
     if m:
         val = m.group(1)
         return "teren" if val == "teren" else "casa"
-
-    # 3) Semnal structural: daca anuntul are completata suprafata
-    # construita (m² de casa), aproape sigur e o casa, chiar daca
-    # titlul/eticheta lipsesc.
-    if house_area_m2:
-        return "casa"
-
-    # 4) Ultima solutie, pentru anunturi incomplete: numaram cuvinte-
-    # cheie tipice de casa vs. teren in toata descrierea libera.
-    house_score = sum(full_text_latin_norm.count(k) for k in HOUSE_KEYWORDS)
-    land_score = sum(full_text_latin_norm.count(k) for k in LAND_KEYWORDS)
-    if house_score > land_score and house_score > 0:
-        return "casa"
-    if land_score > house_score and land_score > 0:
-        return "teren"
 
     return "necunoscut"
 
@@ -233,16 +206,7 @@ def fetch_ad_details(session, ad_id: str):
         adresa = ", ".join(tokens[1:]) if len(tokens) > 1 else full_line
 
     land_ari = parse_land_ari(full_text_lower)
-
-    house_area_m2 = None
-    m = HOUSE_AREA_PATTERN.search(full_text_latin_norm)
-    if m:
-        try:
-            house_area_m2 = float(m.group(1).replace(",", "."))
-        except ValueError:
-            house_area_m2 = None
-
-    property_type = detect_property_type(title, full_text_latin_norm, house_area_m2)
+    property_type = detect_property_type(title, full_text_latin_norm)
 
     return {
         "ad_id": ad_id, "url": url, "title": title,
