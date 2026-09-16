@@ -10,7 +10,7 @@ on:
     # testezi fara sa astepti urmatoarea rulare programata.
 
 permissions:
-  contents: write
+  contents: write concurrency: group: cautare-999-chisinau cancel-in-progress: false
 
 jobs:
   cauta:
