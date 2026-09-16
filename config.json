@@ -1,7 +1,6 @@
 {
   "telegram_chat_ids": [
     "5600797048",
-    "6586499680"
   ],
   "profiles": [
     {
@@ -13,7 +12,7 @@
       "max_price": 100000,
       "min_land": 4,
       "max_land": null,
-      "max_pages": 10
+      "max_pages": 15
     },
     {
       "label": "Teren",
@@ -24,7 +23,7 @@
       "max_price": 50000,
       "min_land": 4,
       "max_land": null,
-      "max_pages": 10
+      "max_pages": 15
     }
   ]
 }
