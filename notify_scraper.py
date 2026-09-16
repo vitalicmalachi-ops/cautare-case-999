@@ -458,16 +458,16 @@ def main():
             details = details_cache.get(ad_id)
             if details is None:
                 continue
-        # Verificarea de mai jos e o plasa suplimentara, bazata pe textul
-        # paginii. Regex-ul care extrage regiunea presupune formatul
-        # "X mun.," - valabil pentru Chisinau/Balti, dar NU pentru raioane
-        # ca Orhei, Ungheni, Ialoveni, Criuleni, unde adresele nu contin
-        # acel format. Daca nu am reusit sa extragem regiunea din text
-        # (details["region"] este None), NU respingem anuntul - avem deja
-        # incredere in filtrul de regiune aplicat direct pe site la
-        # colectare (Pasul 1).
-        if details["region"] is not None and details["region"] != region_expected:
-            continue
+            # Verificarea de mai jos e o plasa suplimentara, bazata pe textul
+            # paginii. Regex-ul care extrage regiunea presupune formatul
+            # "X mun.," - valabil pentru Chisinau/Balti, dar NU pentru raioane
+            # ca Orhei, Ungheni, Ialoveni, Criuleni, unde adresele nu contin
+            # acel format. Daca nu am reusit sa extragem regiunea din text
+            # (details["region"] este None), NU respingem anuntul - avem deja
+            # incredere in filtrul de regiune aplicat direct pe site la
+            # colectare (Pasul 1).
+            if details["region"] is not None and details["region"] != region_expected:
+                continue
             if not matches_subzone(details, subzone_label):
                 continue
             if (details["price"] is None or details["currency"] != "EUR"
