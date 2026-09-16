@@ -36,8 +36,8 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
-CONFIG_PATH = "config.json"
-STATE_PATH = "state.json"
+CONFIG_PATH = os.environ.get("SCRAPER_CONFIG_PATH", "config.json")
+STATE_PATH = os.environ.get("SCRAPER_STATE_PATH", "state.json")
 MAX_SEEN_IDS_KEPT_PER_PROFILE = 3000
 MAX_SEEN_LIST_IDS_KEPT = 6000  # per categorie+regiune, pentru optimizarea de paginare
 
@@ -60,6 +60,7 @@ REGIONS = {
     "Orhei": ("Orhei", "orhei"),
     "Ungheni": ("Ungheni", "ungheni"),
     "Ialoveni": ("Ialoveni", "ialoveni"),
+    "Criuleni": ("Criuleni", "criuleni"),
 }
 
 
@@ -457,8 +458,16 @@ def main():
             details = details_cache.get(ad_id)
             if details is None:
                 continue
-            if details["region"] != region_expected:
-                continue
+        # Verificarea de mai jos e o plasa suplimentara, bazata pe textul
+        # paginii. Regex-ul care extrage regiunea presupune formatul
+        # "X mun.," - valabil pentru Chisinau/Balti, dar NU pentru raioane
+        # ca Orhei, Ungheni, Ialoveni, Criuleni, unde adresele nu contin
+        # acel format. Daca nu am reusit sa extragem regiunea din text
+        # (details["region"] este None), NU respingem anuntul - avem deja
+        # incredere in filtrul de regiune aplicat direct pe site la
+        # colectare (Pasul 1).
+        if details["region"] is not None and details["region"] != region_expected:
+            continue
             if not matches_subzone(details, subzone_label):
                 continue
             if (details["price"] is None or details["currency"] != "EUR"
