@@ -135,6 +135,41 @@ def detect_property_type(full_text_latin_norm: str) -> str:
     return "teren" if val == "teren" else "casa"
 
 
+def fetch_eur_rates() -> dict:
+    """
+    Ia cursul valutar curent (cate unitati dintr-o valuta fac 1 EUR),
+    de la un serviciu gratuit, fara cheie API. Daca serviciul nu
+    raspunde, foloseste curs aproximativ de rezerva (poate fi usor
+    invechit, dar mai bine decat sa pice toata rularea).
+    """
+    fallback = {"EUR": 1.0, "USD": 1.08, "MDL": 19.5}
+    try:
+        resp = requests.get("https://open.er-api.com/v6/latest/EUR", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        rates = data.get("rates", {})
+        usd = rates.get("USD")
+        mdl = rates.get("MDL")
+        if usd and mdl:
+            print(f"Curs valutar: 1 EUR = {usd:.4f} USD = {mdl:.4f} MDL")
+            return {"EUR": 1.0, "USD": usd, "MDL": mdl}
+    except Exception as e:
+        print(f"  Nu am putut lua cursul valutar curent ({e}). Folosesc curs aproximativ de rezerva.")
+    return fallback
+
+
+def convert_to_eur(price, currency: str, rates: dict):
+    if price is None or not currency:
+        return None
+    currency = currency.upper()
+    if currency == "EUR":
+        return price
+    rate = rates.get(currency)
+    if not rate:
+        return None
+    return price / rate
+
+
 def matches_land_types(details: dict, land_types) -> bool:
     if not land_types:
         return True
@@ -363,6 +398,8 @@ def main():
         print("EROARE: config.json trebuie sa aiba o lista 'profiles' cu cel putin un profil.")
         sys.exit(1)
 
+    eur_rates = fetch_eur_rates()
+
     state = load_json(STATE_PATH, {"seen": {}, "seen_list_ids": {}})
     seen_by_profile = state.get("seen", {})
     seen_list_ids_state = state.get("seen_list_ids", {})
@@ -450,7 +487,6 @@ def main():
         min_land = float(profile.get("min_land", 4))
         max_land = profile.get("max_land")
         max_land = float(max_land) if max_land not in (None, "") else None
-        require_eur = profile.get("require_eur", True)
         land_types = profile.get("land_types")
         max_pages = int(profile.get("max_pages", 100))
 
@@ -486,9 +522,8 @@ def main():
                     continue
             if not matches_subzone(details, subzone_label):
                 continue
-            if (details["price"] is None
-                    or (require_eur and details["currency"] != "EUR")
-                    or details["price"] < min_price or details["price"] > max_price):
+            price_eur = convert_to_eur(details["price"], details["currency"], eur_rates)
+            if price_eur is None or price_eur < min_price or price_eur > max_price:
                 continue
             if details["land_ari"] is None or details["land_ari"] < min_land:
                 continue
@@ -501,10 +536,15 @@ def main():
 
             new_for_profile += 1
             stray_tag = " (categorie diferita)" if ad_id in stray_ids else ""
+            if details["currency"] == "EUR":
+                price_line = f"💰 {details['price']:.0f} EUR"
+            else:
+                price_line = f"💰 {details['price']:.0f} {details['currency']} (~{price_eur:.0f} EUR)"
+
             text = (
                 f"🏷️ <b>{label}</b>{stray_tag}\n"
                 f"🏠 {details['title']}\n"
-                f"💰 {details['price']:.0f} EUR\n"
+                f"{price_line}\n"
                 f"📐 {details['land_ari']} ari"
                 + (f" — {details['zona']}" if details['zona'] else "") + "\n"
                 f"🔗 {details['url']}"
