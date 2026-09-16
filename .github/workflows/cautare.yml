@@ -2,9 +2,9 @@ name: Cautare Case 999.md
 
 on:
   schedule:
-    # Ruleaza la fiecare ora. Orele sunt in UTC (Moldova e UTC+2 sau
+    # Ruleaza la fiecare 2 ore. Orele sunt in UTC (Moldova e UTC+2 sau
     # UTC+3 vara), deci ajustezi dupa preferinta daca vrei ore exacte.
-    - cron: "0 * * * *"
+    - cron: "0 */2* * *"
   workflow_dispatch:
     # Permite sa apesi manual butonul "Run workflow" din GitHub, ca sa
     # testezi fara sa astepti urmatoarea rulare programata.
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   cauta:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Descarca fisierele din depozit
         uses: actions/checkout@v4
