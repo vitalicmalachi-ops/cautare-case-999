@@ -2,9 +2,9 @@ name: Cautare Case 999.md
 
 on:
   schedule:
-    # Ruleaza la fiecare 2 ore. Orele sunt in UTC (Moldova e UTC+2 sau
+    # Ruleaza la fiecare 3 ore. Orele sunt in UTC (Moldova e UTC+2 sau
     # UTC+3 vara), deci ajustezi dupa preferinta daca vrei ore exacte.
-    - cron: "0 */2 * * *"
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     # Permite sa apesi manual butonul "Run workflow" din GitHub, ca sa
     # testezi fara sa astepti urmatoarea rulare programata.
