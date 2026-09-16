@@ -135,6 +135,13 @@ def detect_property_type(full_text_latin_norm: str) -> str:
     return "teren" if val == "teren" else "casa"
 
 
+def matches_land_types(details: dict, land_types) -> bool:
+    if not land_types:
+        return True
+    text = details.get("full_text_norm") or ""
+    return any(strip_diacritics(kw) in text for kw in land_types)
+
+
 def matches_subzone(details: dict, subzone_label: str) -> bool:
     if not subzone_label or subzone_label.startswith("Toate"):
         return True
@@ -201,6 +208,7 @@ def fetch_ad_details(session, ad_id: str):
         "region": region, "land_ari": land_ari,
         "zona": zona, "adresa": adresa,
         "property_type": property_type,
+        "full_text_norm": full_text_latin_norm,
     }
 
 
@@ -442,6 +450,8 @@ def main():
         min_land = float(profile.get("min_land", 4))
         max_land = profile.get("max_land")
         max_land = float(max_land) if max_land not in (None, "") else None
+        require_eur = profile.get("require_eur", True)
+        land_types = profile.get("land_types")
         max_pages = int(profile.get("max_pages", 100))
 
         _, region_expected, region_strict = REGIONS[region_label]
@@ -476,12 +486,15 @@ def main():
                     continue
             if not matches_subzone(details, subzone_label):
                 continue
-            if (details["price"] is None or details["currency"] != "EUR"
+            if (details["price"] is None
+                    or (require_eur and details["currency"] != "EUR")
                     or details["price"] < min_price or details["price"] > max_price):
                 continue
             if details["land_ari"] is None or details["land_ari"] < min_land:
                 continue
             if max_land is not None and details["land_ari"] > max_land:
+                continue
+            if not matches_land_types(details, land_types):
                 continue
             if ad_id in seen_ids:
                 continue
