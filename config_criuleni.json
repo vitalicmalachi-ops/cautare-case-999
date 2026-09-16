@@ -8,8 +8,10 @@
       "property_type": "teren",
       "min_price": 0,
       "max_price": 100000000,
-      "min_land": 0,
+      "require_eur": false,
+      "min_land": 100,
       "max_land": null,
+      "land_types": ["agricol", "constructii"],
       "max_pages": 50
     }
   ]
