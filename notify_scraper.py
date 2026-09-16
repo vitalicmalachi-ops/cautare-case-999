@@ -55,12 +55,16 @@ HEADERS = {
 }
 
 REGIONS = {
-    "Chișinău mun.": ("Chișinău mun.", "chisinau"),
-    "Bălți mun.": ("Bălți mun.", "balti"),
-    "Orhei": ("Orhei", "orhei"),
-    "Ungheni": ("Ungheni", "ungheni"),
-    "Ialoveni": ("Ialoveni", "ialoveni"),
-    "Criuleni": ("Criuleni", "criuleni"),
+    # (text de cautat la click pe filtrul de regiune, regiunea asteptata
+    #  in text, verificare stricta?)
+    # "mun." = format fiabil in text -> verificare stricta (Chisinau, Balti).
+    # raioane = fara "mun.," in text -> ne bazam DOAR pe filtrul site-ului.
+    "Chișinău mun.": ("Chișinău mun.", "chisinau", True),
+    "Bălți mun.": ("Bălți mun.", "balti", True),
+    "Orhei": ("Orhei", "orhei", False),
+    "Ungheni": ("Ungheni", "ungheni", False),
+    "Ialoveni": ("Ialoveni", "ialoveni", False),
+    "Criuleni": ("Criuleni", "criuleni", False),
 }
 
 
@@ -257,7 +261,7 @@ def save_json(path, data):
 # ---------------------------------------------------------------------------
 
 def collect_ad_ids_for_region(page, base_url: str, region_label: str, max_pages: int, known_ids: set):
-    region_click_text, _ = REGIONS[region_label]
+    region_click_text, _, _ = REGIONS[region_label]
 
     page.goto(base_url, wait_until="networkidle", timeout=60000)
     page.wait_for_timeout(1000)
@@ -440,7 +444,7 @@ def main():
         max_land = float(max_land) if max_land not in (None, "") else None
         max_pages = int(profile.get("max_pages", 100))
 
-        _, region_expected = REGIONS[region_label]
+        _, region_expected, region_strict = REGIONS[region_label]
         base_url = CATEGORY_URLS.get(property_type, CATEGORY_URLS["oricare"])
         own_ids = set(ad_ids_by_key.get((base_url, region_label, max_pages), []))
 
@@ -458,16 +462,18 @@ def main():
             details = details_cache.get(ad_id)
             if details is None:
                 continue
-            # Verificarea de mai jos e o plasa suplimentara, bazata pe textul
-            # paginii. Regex-ul care extrage regiunea presupune formatul
-            # "X mun.," - valabil pentru Chisinau/Balti, dar NU pentru raioane
-            # ca Orhei, Ungheni, Ialoveni, Criuleni, unde adresele nu contin
-            # acel format. Daca nu am reusit sa extragem regiunea din text
-            # (details["region"] este None), NU respingem anuntul - avem deja
-            # incredere in filtrul de regiune aplicat direct pe site la
-            # colectare (Pasul 1).
-            if details["region"] is not None and details["region"] != region_expected:
-                continue
+            # Pentru regiuni de tip "mun." (Chisinau, Balti), formatul din
+            # text e fiabil -> verificare stricta, respingem daca nu se
+            # potriveste exact (inclusiv daca n-am putut extrage regiunea).
+            # Pentru raioane (Orhei, Ungheni, Ialoveni, Criuleni), textul
+            # NU contine acel format -> nu putem verifica prin text, ne
+            # bazam exclusiv pe filtrul de regiune aplicat pe site (Pasul 1).
+            if region_strict:
+                if details["region"] != region_expected:
+                    continue
+            else:
+                if details["region"] is not None and details["region"] != region_expected:
+                    continue
             if not matches_subzone(details, subzone_label):
                 continue
             if (details["price"] is None or details["currency"] != "EUR"
