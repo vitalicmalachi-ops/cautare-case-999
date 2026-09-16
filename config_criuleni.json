@@ -1,0 +1,16 @@
+{
+  "telegram_chat_ids": ["5600797048"],
+  "profiles": [
+    {
+      "label": "Teren agricol Criuleni",
+      "region_label": "Criuleni",
+      "subzone_label": "Toate",
+      "property_type": "teren",
+      "min_price": 0,
+      "max_price": 100000000,
+      "min_land": 0,
+      "max_land": null,
+      "max_pages": 50
+    }
+  ]
+}
