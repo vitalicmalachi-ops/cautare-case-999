@@ -1,0 +1,55 @@
+name: Cautare Teren Criuleni
+
+on:
+  schedule:
+    # De doua ori pe zi: 8:00 si 16:00, ora Moldovei.
+    # Acum (vara, UTC+3) asta inseamna 5:00 si 13:00 UTC. Cand se schimba
+    # ora (ultima duminica din octombrie, Moldova trece la UTC+2), orele
+    # locale se vor decala cu o ora (adica ar deveni 7:00/15:00) - daca
+    # vrei sa ramana fix 8:00/16:00 tot anul, ajusteaza cronul atunci la
+    # "0 6,14 * * *".
+    - cron: "0 5,13 * * *"
+  workflow_dispatch:
+    # Permite sa apesi manual butonul "Run workflow" din GitHub, ca sa
+    # testezi fara sa astepti urmatoarea rulare programata.
+
+permissions:
+  contents: write
+
+jobs:
+  cauta_criuleni:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SCRAPER_CONFIG_PATH: config_criuleni.json
+      SCRAPER_STATE_PATH: state_criuleni.json
+    steps:
+      - name: Descarca fisierele din depozit
+        uses: actions/checkout@v4
+
+      - name: Pregateste Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instaleaza librariile necesare
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Ruleaza cautarea si trimite notificari
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+        run: python -u notify_scraper.py
+
+      - name: Salveaza lista anunturilor deja vazute
+        if: always()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add state_criuleni.json
+          git diff --staged --quiet && echo "Nimic de salvat." && exit 0
+          git commit -m "Actualizeaza state_criuleni.json"
+          git pull --rebase origin main
+          git push origin main
