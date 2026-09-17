@@ -509,16 +509,18 @@ def main():
             if details is None:
                 continue
             # Pentru regiuni de tip "mun." (Chisinau, Balti), formatul din
-            # text e fiabil -> verificare stricta, respingem daca nu se
-            # potriveste exact (inclusiv daca n-am putut extrage regiunea).
-            # Pentru raioane (Orhei, Ungheni, Ialoveni, Criuleni), textul
-            # NU contine acel format -> nu putem verifica prin text, ne
-            # bazam exclusiv pe filtrul de regiune aplicat pe site (Pasul 1).
+            # text e fiabil -> verificare stricta pe formatul "X mun.,".
+            # Pentru raioane (Orhei, Ungheni, Ialoveni, Criuleni), acel
+            # format nu exista, dar filtrul de regiune de pe site s-a
+            # dovedit nesigur (uneori nu se aplica deloc, lasand sa treaca
+            # anunturi din toata tara) - de aceea cerem explicit ca numele
+            # raionului sa apara undeva in textul paginii anuntului, ca
+            # plasa de siguranta reala, nu doar incredere oarba in site.
             if region_strict:
                 if details["region"] != region_expected:
                     continue
             else:
-                if details["region"] is not None and details["region"] != region_expected:
+                if region_expected not in (details.get("full_text_norm") or ""):
                     continue
             if not matches_subzone(details, subzone_label):
                 continue
