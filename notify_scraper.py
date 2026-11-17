@@ -177,6 +177,41 @@ def matches_land_types(details: dict, land_types) -> bool:
     return any(strip_diacritics(kw) in text for kw in land_types)
 
 
+# Cuvinte care arata ca anuntul NU e o vanzare (chirie, arenda, cerere de
+# cumparare/inchiriere). Verificate in TITLU - zona unde autorul spune pe
+# scurt ce ofera. Cuvintele romanesti se compara fara diacritice; cele
+# rusesti pe titlul original (litere mici), fiindca normalizarea
+# caracterelor "asemanatoare" le-ar deforma.
+NON_SALE_WORDS_RO = [
+    "chirie", "inchiriez", "inchiriere", "inchiriat", "arenda", "arendez",
+    "cumpar", "cumparam", "doresc sa cumpar", "caut casa", "caut teren",
+    "cautam casa", "cautam teren",
+]
+NON_SALE_WORDS_RU = [
+    "аренд", "сдам", "сдаю", "сдается", "сдаётся", "сниму", "куплю", "ищу",
+]
+# Daca pagina are un camp de tip "Oferta: Chirie" / "Tip anunt: Cumpar",
+# il folosim si pe acela (valoarea apare imediat dupa eticheta).
+OFFER_FIELD_PATTERN = re.compile(
+    r"(?:oferta|tip(?:ul)? anunt\w*|tip(?:ul)? ofert\w*)\W{0,6}"
+    r"(chirie|inchiri\w*|arend\w*|cumpar\w*|cerere)"
+)
+
+
+def is_sale_offer(details: dict) -> bool:
+    title = details.get("title") or ""
+    title_ro = strip_diacritics(normalize_lookalikes(title))
+    title_ru = title.lower()
+    if any(w in title_ro for w in NON_SALE_WORDS_RO):
+        return False
+    if any(w in title_ru for w in NON_SALE_WORDS_RU):
+        return False
+    text = details.get("full_text_norm") or ""
+    if OFFER_FIELD_PATTERN.search(text):
+        return False
+    return True
+
+
 def matches_subzone(details: dict, subzone_label: str) -> bool:
     if not subzone_label or subzone_label.startswith("Toate"):
         return True
@@ -488,6 +523,7 @@ def main():
         max_land = profile.get("max_land")
         max_land = float(max_land) if max_land not in (None, "") else None
         land_types = profile.get("land_types")
+        sale_only = profile.get("sale_only", True)
         max_pages = int(profile.get("max_pages", 100))
 
         _, region_expected, region_strict = REGIONS[region_label]
@@ -507,6 +543,10 @@ def main():
         for ad_id in candidate_ids:
             details = details_cache.get(ad_id)
             if details is None:
+                continue
+            # Doar anunturi de VANZARE: sarim peste chirii, arenda si
+            # cereri de tip "cumpar" / "caut".
+            if sale_only and not is_sale_offer(details):
                 continue
             # Pentru regiuni de tip "mun." (Chisinau, Balti), formatul din
             # text e fiabil -> verificare stricta pe formatul "X mun.,".
